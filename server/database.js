@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyMigrations } from './migrations.js';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 export function openDatabase(path = process.env.DATABASE_PATH || resolve(projectRoot, 'data/brightloop.sqlite')) {
@@ -11,6 +12,7 @@ export function openDatabase(path = process.env.DATABASE_PATH || resolve(project
   db.exec('BEGIN');
   try {
     db.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
+    applyMigrations(db);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

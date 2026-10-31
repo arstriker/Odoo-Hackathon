@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase } from '../server/database.js';
 import { createApp } from '../server/index.js';
+import { latestSchemaVersion } from '../server/migrations.js';
 
 test('schema persists, reopens safely and enforces financial constraints', () => {
   const directory = mkdtempSync(join(tmpdir(), 'brightloop-'));
@@ -26,7 +27,7 @@ test('schema persists, reopens safely and enforces financial constraints', () =>
     db.close();
     db = openDatabase(path);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM invoices').get().count, 1);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 1);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, latestSchemaVersion);
   } finally { db?.close(); rmSync(directory, {recursive:true,force:true}); }
 });
 

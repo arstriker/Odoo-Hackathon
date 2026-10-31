@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase, projectRoot } from './database.js';
+import { developmentUser } from './access.js';
+import { HttpError, readJson } from './http.js';
+import { routes as catalogRoutes } from './catalog.js';
 
 const collections = {
   customers: "SELECT id,name,email,created_at FROM users WHERE role = 'customer' ORDER BY id DESC LIMIT 100",
@@ -14,9 +17,18 @@ const collections = {
   discounts: 'SELECT id,name,type,value,start_date,end_date,usage_count,usage_limit FROM discounts ORDER BY id DESC LIMIT 100',
   settings: 'SELECT id,name,rate_basis_points,active FROM tax_rules ORDER BY id DESC LIMIT 100',
 };
-const assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css' };
+const assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/manage.js': 'manage.js', '/styles.css': 'styles.css' };
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
-export function createApp(db) {
+
+// Route patterns such as '/api/products/:id' compiled to regular expressions with named groups.
+const compile = list => list.map(([method, pattern, handler]) => ({
+  method,
+  handler,
+  regex: new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`),
+}));
+const apiRoutes = compile([...catalogRoutes]);
+
+export function createApp(db, { authenticate = () => developmentUser } = {}) {
   return createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'");
@@ -25,14 +37,25 @@ export function createApp(db) {
       res.end(JSON.stringify(data));
     };
     try {
-      const path = new URL(req.url, 'http://localhost').pathname;
-      if (req.method !== 'GET') return json(405, { error: 'Stage 1 exposes read-only endpoints.' });
+      const url = new URL(req.url, 'http://localhost');
+      const path = url.pathname;
+      const matches = apiRoutes.map(route => ({ route, match: route.regex.exec(path) })).filter(entry => entry.match);
+      const found = matches.find(entry => entry.route.method === req.method);
+      if (found) {
+        let parsed;
+        const body = async () => (parsed ??= await readJson(req));
+        const user = await authenticate(req, db);
+        const result = await found.route.handler({ db, req, user, body, params: found.match.groups ?? {}, query: url.searchParams });
+        return result && Number.isInteger(result.status) && Object.hasOwn(result, 'data') ? json(result.status, result.data) : json(200, result);
+      }
+      if (matches.length) return json(405, { error: 'This method is not supported for this endpoint.' });
+      if (req.method !== 'GET') return json(405, { error: 'This method is not supported for this endpoint.' });
       if (path === '/api/health') return json(200, { status: 'ok', database: db.prepare('SELECT 1 AS connected').get().connected === 1 ? 'connected' : 'unavailable', schemaVersion: db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version });
       if (path === '/api/overview') {
         const counts = {};
         for (const table of ['products','plans','subscriptions','invoices','payments','discounts']) counts[table] = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
         counts.customers = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='customer'").get().count;
-        return json(200, { counts, stage: 1, currency: 'INR' });
+        return json(200, { counts, stage: 3, currency: 'INR' });
       }
       if (path.startsWith('/api/')) {
         const query = collections[path.slice(5)];
@@ -44,6 +67,8 @@ export function createApp(db) {
       res.writeHead(200, { 'Content-Type': mime[extname(file)], 'Cache-Control': 'no-cache' });
       res.end(body);
     } catch (error) {
+      if (error instanceof HttpError) return json(error.status, { error: error.message });
+      if (/constraint failed/.test(error?.message ?? '')) return json(409, { error: 'The change conflicts with existing data.' });
       console.error(error);
       if (!res.headersSent) json(500, { error: 'Unable to complete request' });
       else res.end();
