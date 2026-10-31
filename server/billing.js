@@ -1,5 +1,6 @@
 // Stage 5: billing engine. Turns due subscriptions into invoices, one per billing period.
 import { TEAM, requireRole } from './access.js';
+import { discountLines } from './discounts.js';
 import { HttpError, addDays, addInterval, routeId, today, transaction } from './http.js';
 
 // Billing creates drafts. Staff confirm them before they are sent; Stage 6 payments mark them paid.
@@ -50,7 +51,9 @@ function invoiceNextPeriod(db, subscription, plan, issueDate) {
   if (overlapping) return null;
 
   const customer = db.prepare('SELECT name, email FROM users WHERE id = ?').get(subscription.customer_id);
-  const lines = subscriptionLines(db, subscription.id).map(line => ({ ...line, ...priceLine(line) }));
+  const rawLines = subscriptionLines(db, subscription.id);
+  const { lineDiscounts, applied } = discountLines(db, subscription.id, rawLines, periodStart);
+  const lines = rawLines.map((line, index) => ({ ...line, ...priceLine({ ...line, discount_amount: lineDiscounts[index] }) }));
   const totals = { subtotal: 0, discount_total: 0, tax_total: 0, total: 0 };
   for (const line of lines) {
     totals.subtotal += line.subtotal;
@@ -76,6 +79,11 @@ function invoiceNextPeriod(db, subscription, plan, issueDate) {
     const description = line.variant_value ? `${line.product_name} (${line.variant_attribute}: ${line.variant_value})` : line.product_name;
     insertLine.run(id, line.product_id, description, line.quantity, line.unit_price,
       line.tax_rate_basis_points, line.discount_amount, line.tax_amount, line.amount);
+  }
+  // Each invoice a discount appears on counts as one use, in the same transaction as the invoice.
+  for (const { discount_id, amount } of applied) {
+    db.prepare('INSERT INTO invoice_discounts(invoice_id, discount_id, amount) VALUES (?, ?, ?)').run(id, discount_id, amount);
+    db.prepare('UPDATE discounts SET usage_count = usage_count + 1 WHERE id = ?').run(discount_id);
   }
   db.prepare("INSERT INTO subscription_events(subscription_id, action, from_status, to_status, note) VALUES (?, 'invoice', ?, ?, ?)")
     .run(subscription.id, subscription.status, subscription.status, `Invoiced ${periodStart} to ${end}`);
@@ -131,9 +139,12 @@ export function getInvoice(db, id, user) {
     ...invoice,
     balance: invoice.status === 'cancelled' ? 0 : invoice.total - invoice.amount_paid,
     lines: db.prepare('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY id').all(id),
+    discounts: db.prepare(`SELECT d.id, d.name, d.type, d.value, x.amount FROM invoice_discounts x JOIN discounts d ON d.id = x.discount_id
+      WHERE x.invoice_id = ? ORDER BY d.id`).all(id),
     payments,
     actions: user?.role === 'customer' ? [] : Object.keys(INVOICE_ACTIONS)
       .filter(name => INVOICE_ACTIONS[name].from.includes(invoice.status) && !(name === 'cancel' && payments.length)),
+    can_record_payment: user?.role !== 'customer' && invoice.status === 'confirmed' && invoice.total > invoice.amount_paid,
   };
 }
 
@@ -149,7 +160,13 @@ function runInvoiceAction(db, id, name, user) {
     if (name === 'cancel' && db.prepare('SELECT 1 FROM payments WHERE invoice_id = ? LIMIT 1').get(id)) {
       throw new HttpError(409, 'This invoice has payments and cannot be cancelled.');
     }
-    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(action.to, id);
+    // A ₹0 invoice (for example, fully discounted) has nothing to collect, so confirming it settles it.
+    const status = name === 'confirm' && invoice.total === 0 ? 'paid' : action.to;
+    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, id);
+    // A cancelled invoice gives its discount uses back.
+    if (name === 'cancel') {
+      db.prepare('UPDATE discounts SET usage_count = usage_count - 1 WHERE id IN (SELECT discount_id FROM invoice_discounts WHERE invoice_id = ?)').run(id);
+    }
     return getInvoice(db, id, user);
   });
 }
