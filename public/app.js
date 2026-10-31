@@ -9,15 +9,31 @@ const modules = {
   discounts: { title: 'Discounts', icon: '%', stage: 6, description: 'Manage offers, eligibility rules and discount usage limits.', columns: ['Name','Type','Value','Uses'], fields: ['name','type','value','usage_count'] },
   settings: { title: 'Settings', icon: '⚙', stage: 3, description: 'Configure tax rules and workspace preferences.', columns: ['Tax rule','Rate','Active'], fields: ['name','rate_basis_points','active'] },
 };
-const content = document.querySelector('#content');
+let content = document.querySelector('#content');
 const escape = (value) => String(value ?? '—').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const money = value => new Intl.NumberFormat('en-IN', {style:'currency',currency:'INR',maximumFractionDigits:2}).format(value/100);
-async function api(path) {
-  const response = await fetch(`/api/${path}`);
-  if (!response.ok) throw new Error('The server could not load this page. Check that the backend is running.');
-  return response.json();
+async function api(path, { method = 'GET', body } = {}) {
+  let response;
+  try {
+    response = await fetch(`/api/${path}`, body === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch {
+    throw new Error('The server could not be reached. Check that the backend is running.');
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'The server could not complete this request.');
+  return data;
 }
-const heading = (title, description) => `<div class="page-heading"><div><p class="eyebrow">YOUR WORKSPACE, CONNECTED</p><h1>${title}</h1><p class="subtitle">${description}</p></div><span class="badge">Stage 1 · Foundation</span></div>`;
+const heading = (title, description, badge = 'Stage 1 · Foundation', back) => `<div class="page-heading"><div>${back ? `<a class="back-link" href="${back}">← Back</a>` : '<p class="eyebrow">YOUR WORKSPACE, CONNECTED</p>'}<h1>${title}</h1><p class="subtitle">${description}</p></div><span class="badge">${badge}</span></div>`;
+const empty = (icon, title, text) => `<div class="empty"><div class="empty-icon" aria-hidden="true">${icon}</div><h2>${title}</h2><p>${text}</p></div>`;
+let toastTimer;
+function notify(message, tone = 'success') {
+  let toast = document.querySelector('#toast');
+  if (!toast) { toast = document.createElement('div'); toast.id = 'toast'; toast.setAttribute('role', 'status'); document.body.append(toast); }
+  toast.textContent = message;
+  toast.className = `toast show ${tone}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.className = 'toast'; }, 3500);
+}
 function overview(data, health) {
   const cards = [['Customers',data.counts.customers,'Customer accounts','♧'],['Products',data.counts.products,'Products in your catalogue','◇'],['Plans',data.counts.plans,'Recurring billing plans','▤'],['Subscriptions',data.counts.subscriptions,'Across all lifecycle stages','↻']];
   return `${heading('Workspace overview','A clear view of your subscription business.')}<section class="hero"><p class="eyebrow">BUILT FOR RECURRING BUSINESS</p><h2>Every subscription.<br>One connected workspace.</h2><p>Your foundation is ready. Explore the workspace as we build the journey from your first product to your next renewal.</p><a href="#products">Explore your catalogue <span aria-hidden="true">↗</span></a></section><section class="stats" aria-label="Workspace totals">${cards.map(([label,value,note,icon])=>`<article class="stat"><div class="stat-label">${label}<span aria-hidden="true">${icon}</span></div><div class="stat-value">${value}</div><small>${note}</small></article>`).join('')}</section><div class="two-column"><section class="panel"><h2>A solid place to start</h2><p class="panel-intro">Stage 01 / 08 · Application foundation</p>${[['Application shell','Responsive navigation across all eight workspace modules.'],['Connected database','Persistent SQLite storage with relationships and constraints.'],['Backend API','Read-only endpoints connecting the interface to real records.']].map(([title,note])=>`<div class="check-row"><span class="check-icon" aria-hidden="true">✓</span><div><strong>${title}</strong><small>${note}</small></div></div>`).join('')}</section><section class="panel"><h2>System status</h2><p class="panel-intro">Your local development environment</p><div class="connection"><span>Database connection</span><span><span class="pulse"></span>${escape(health.database)}</span></div><div class="detail-row"><span>Storage engine</span><strong>SQLite</strong></div><div class="detail-row"><span>Schema version</span><strong>v${health.schemaVersion}</strong></div><div class="detail-row"><span>Workspace currency</span><strong>INR · ₹</strong></div><p class="note">Next up: accounts & permissions. Authentication and editing become available in the following stages.</p></section></div>`;
@@ -36,13 +52,26 @@ function moduleView(key, data) {
 let revision = 0;
 async function render() {
   const current = ++revision;
-  const key = Object.hasOwn(modules, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const [route, id] = location.hash.slice(1).split('/');
+  const key = Object.hasOwn(modules, route) ? route : 'overview';
+  const view = window.BrightloopViews?.[key];
   const title = modules[key].title;
   document.title = `${title} · Brightloop`;
   document.querySelector('#breadcrumb').textContent = title;
   document.querySelector('#navigation').innerHTML = Object.entries(modules).map(([name,item])=>`<a class="nav-link ${name === key ? 'active' : ''}" ${name === key ? 'aria-current="page"' : ''} href="#${name}"><span class="nav-icon" aria-hidden="true">${item.icon}</span>${item.title}</a>`).join('');
   content.innerHTML = '<p class="subtitle" role="status">Loading workspace…</p>';
   try {
+    if (view) {
+      const result = await view({ id, api, escape, money, heading, empty, notify, rerender: render });
+      if (current !== revision) return;
+      // Replacing the node drops listeners bound by the previous view.
+      const fresh = content.cloneNode(false);
+      fresh.innerHTML = result.html;
+      content.replaceWith(fresh);
+      content = fresh;
+      result.mount?.(fresh);
+      return;
+    }
     const html = key === 'overview' ? await Promise.all([api('overview'),api('health')]).then(([data,health])=>overview(data,health)) : moduleView(key,await api(key));
     if (current === revision) content.innerHTML = html;
   } catch (error) {

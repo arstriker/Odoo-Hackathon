@@ -37,4 +37,5 @@ erDiagram
 - Discounts have date, quantity, purchase and usage constraints. Product targeting, subscription assignment and invoice usage each have separate association tables. Eligibility evaluation and atomic usage accounting belong to Stage 6.
 - Payments are separate records so partial payments are possible. Remaining balance, overpayment handling and marking invoices paid belong to Stage 6.
 - Database constraints enforce nonnegative money, valid enumerations, foreign keys and invoice header arithmetic. Cross-record checks such as line-total reconciliation belong to transactional write services.
-- `schema_migrations` records initial schema version 1. Initialization is idempotent. Future schema alterations need new ordered migrations; changing `CREATE TABLE IF NOT EXISTS` does not upgrade existing tables.
+- Stage 3 validates plan availability dates, enumerations and money at the API layer. Products and tax rules that are referenced are archived rather than deleted, and referenced plans cannot be deleted.
+- `schema_migrations` records initial schema version 1; `server/migrations.js` applies later versions in order (version 2 adds catalogue indexes). Initialization is idempotent. Future schema alterations need new ordered migrations; changing `CREATE TABLE IF NOT EXISTS` does not upgrade existing tables.
