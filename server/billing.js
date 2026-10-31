@@ -1,5 +1,13 @@
 // Stage 5: billing engine. Turns due subscriptions into invoices, one per billing period.
-import { addDays, addInterval, today, transaction } from './http.js';
+import { TEAM, requireRole } from './access.js';
+import { HttpError, addDays, addInterval, routeId, today, transaction } from './http.js';
+
+// Billing creates drafts. Staff confirm them before they are sent; Stage 6 payments mark them paid.
+export const INVOICE_ACTIONS = {
+  confirm: { from: ['draft'], to: 'confirmed', label: 'Confirm' },
+  cancel:  { from: ['draft', 'confirmed'], to: 'cancelled', label: 'Cancel' },
+};
+const INVOICE_STATUSES = ['draft', 'confirmed', 'paid', 'cancelled'];
 
 // Periods count from the start date, so monthly billing from 31 Jan stays on month ends (28 Feb, 31 Mar)
 // instead of drifting to the 28th. Periods are start-inclusive and end-exclusive.
@@ -107,3 +115,88 @@ export function runBilling(db, date = today()) {
   }
   return result;
 }
+
+// Customers only see their own invoices, and not drafts, which are still internal.
+export function getInvoice(db, id, user) {
+  const invoice = db.prepare(`
+    SELECT i.*, s.number AS subscription_number,
+           COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = i.id), 0) AS amount_paid
+    FROM invoices i JOIN subscriptions s ON s.id = i.subscription_id
+    WHERE i.id = ?`).get(id);
+  if (!invoice || (user?.role === 'customer' && (invoice.customer_id !== user.id || invoice.status === 'draft'))) {
+    throw new HttpError(404, 'Invoice not found.');
+  }
+  const payments = db.prepare('SELECT id, method, amount, payment_date, note, reference FROM payments WHERE invoice_id = ? ORDER BY payment_date, id').all(id);
+  return {
+    ...invoice,
+    balance: invoice.status === 'cancelled' ? 0 : invoice.total - invoice.amount_paid,
+    lines: db.prepare('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY id').all(id),
+    payments,
+    actions: user?.role === 'customer' ? [] : Object.keys(INVOICE_ACTIONS)
+      .filter(name => INVOICE_ACTIONS[name].from.includes(invoice.status) && !(name === 'cancel' && payments.length)),
+  };
+}
+
+function runInvoiceAction(db, id, name, user) {
+  const action = Object.hasOwn(INVOICE_ACTIONS, name) ? INVOICE_ACTIONS[name] : null;
+  if (!action) throw new HttpError(404, 'Unknown action.');
+  return transaction(db, () => {
+    const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+    if (!invoice) throw new HttpError(404, 'Invoice not found.');
+    if (!action.from.includes(invoice.status)) {
+      throw new HttpError(409, `A ${invoice.status} invoice cannot be moved with "${action.label}".`);
+    }
+    if (name === 'cancel' && db.prepare('SELECT 1 FROM payments WHERE invoice_id = ? LIMIT 1').get(id)) {
+      throw new HttpError(409, 'This invoice has payments and cannot be cancelled.');
+    }
+    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(action.to, id);
+    return getInvoice(db, id, user);
+  });
+}
+
+function listInvoices(db, query, user) {
+  const where = [];
+  const params = [];
+  const status = query.get('status');
+  if (status && INVOICE_STATUSES.includes(status)) { where.push('i.status = ?'); params.push(status); }
+  const subscriptionId = Number(query.get('subscription_id'));
+  if (Number.isSafeInteger(subscriptionId) && subscriptionId > 0) { where.push('i.subscription_id = ?'); params.push(subscriptionId); }
+  const own = user?.role === 'customer' ? "i.customer_id = ? AND i.status <> 'draft'" : '';
+  if (own) { where.push(own); params.push(user.id); }
+  const search = query.get('q')?.trim();
+  if (search) {
+    where.push('(i.number LIKE ? OR i.customer_name LIKE ? OR i.customer_email LIKE ? OR s.number LIKE ?)');
+    params.push(...Array(4).fill(`%${search.slice(0, 80)}%`));
+  }
+  const items = db.prepare(`
+    SELECT i.id, i.number, i.status, i.customer_name, i.period_start, i.period_end, i.issue_date, i.due_date, i.total,
+           s.number AS subscription_number,
+           i.total - COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = i.id), 0) AS balance
+    FROM invoices i JOIN subscriptions s ON s.id = i.subscription_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY i.id DESC LIMIT 200`).all(...params);
+  const counts = Object.fromEntries(INVOICE_STATUSES.map(name => [name, 0]));
+  for (const row of db.prepare(`SELECT status, COUNT(*) AS count FROM invoices i ${own ? `WHERE ${own}` : ''} GROUP BY status`).all(...(own ? [user.id] : []))) {
+    counts[row.status] = row.count;
+  }
+  return { items, limit: 200, counts };
+}
+
+export const routes = [
+  ['POST', '/api/billing/run', ({ db, user }) => {
+    requireRole(user, 'admin');
+    return runBilling(db);
+  }],
+  ['GET', '/api/invoices', ({ db, user, query }) => {
+    requireRole(user, ...TEAM, 'customer');
+    return listInvoices(db, query, user);
+  }],
+  ['GET', '/api/invoices/:id', ({ db, user, params }) => {
+    requireRole(user, ...TEAM, 'customer');
+    return getInvoice(db, routeId(params.id), user);
+  }],
+  ['POST', '/api/invoices/:id/actions/:action', ({ db, user, params }) => {
+    requireRole(user, ...TEAM);
+    return runInvoiceAction(db, routeId(params.id), params.action, user);
+  }],
+];
