@@ -62,6 +62,15 @@ Account registration, authentication, record editing, scheduling, invoicing, pay
 - **Access**: admins and staff see and manage all invoices; customers see only their own, and never drafts.
 - **Screens**: an Invoices page with status tabs, overdue flags and a “Run billing now” button; an invoice page with lines, totals, amount paid, balance and Confirm/Cancel; and an Invoices section on each subscription.
 
+## Stage 6 deliverables · Payments
+
+- **Payments**: staff record payments (method, amount, date, optional reference and note) against confirmed invoices. Methods: bank transfer, UPI, card, cash, cheque, other.
+- **Partial payments**: each payment reduces the balance; the invoice becomes Paid automatically when the balance reaches ₹0. Overpayments, future dates, duplicate references and payments on draft, paid or cancelled invoices are rejected.
+- **Corrections**: admins can remove a payment recorded by mistake; a paid invoice then goes back to Confirmed.
+- **₹0 invoices** are marked Paid as soon as they are confirmed.
+- **Access**: customers see only payments on their own invoices and cannot record or remove payments.
+- **Screens**: a “Record payment” form on each confirmed invoice (amount defaults to the balance due), payments listed on the invoice with a Remove option, and a Payments page with totals and search.
+
 ## Structure
 
 ```text
@@ -72,6 +81,8 @@ server/access.js        Role checks and the Stage 2 authentication hook
 server/catalog.js       Stage 3 API: products, variants, tax rules and plans
 server/subscriptions.js Stage 4 API: customers, quotation templates and subscription lifecycle
 server/billing.js       Stage 5 billing engine and invoice API
+server/payments.js      Stage 6 payments API
+public/payments.js      Stage 6 Payments page (record payments from the invoice page in public/invoices.js)
 server/database.js      Database connection and initialization
 server/migrations.js    Ordered schema migrations after version 1
 server/schema.sql       Initial schema and indexes
@@ -83,6 +94,7 @@ tests/foundation.test.js API, persistence and constraint tests
 tests/catalog.test.js   Stage 3 catalogue and permission tests
 tests/subscriptions.test.js Stage 4 lifecycle, rules and access tests
 tests/billing.test.js   Stage 5 billing periods, totals, invoice actions and access tests
+tests/payments.test.js  Stage 6 payment rules, corrections and access tests
 data/                   Runtime SQLite files (ignored)
 ```
 
@@ -127,6 +139,14 @@ Stage 5 endpoints:
 | POST | `/api/billing/run` (returns `{ invoices, skipped_paused }`) | admin |
 | GET | `/api/invoices` (`?status=`, `?q=`, `?subscription_id=`), `/api/invoices/:id` | admin, staff; customers see their own, not drafts |
 | POST | `/api/invoices/:id/actions/{confirm,cancel}` | admin, staff |
+
+Stage 6 endpoints:
+
+| Method | Path | Role |
+|---|---|---|
+| GET | `/api/payments` (`?q=`, `?invoice_id=`; returns `{ items, totals }`) | admin, staff; customers see their own |
+| POST | `/api/invoices/:id/payments` (`{ method, amount, payment_date?, reference?, note? }`) | admin, staff |
+| DELETE | `/api/payments/:id` | admin |
 
 Example: `POST /api/plans` with `{"name":"Business monthly","price":99900,"interval":"monthly","minimum_quantity":1,"auto_close":true}`.
 

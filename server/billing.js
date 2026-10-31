@@ -134,6 +134,7 @@ export function getInvoice(db, id, user) {
     payments,
     actions: user?.role === 'customer' ? [] : Object.keys(INVOICE_ACTIONS)
       .filter(name => INVOICE_ACTIONS[name].from.includes(invoice.status) && !(name === 'cancel' && payments.length)),
+    can_record_payment: user?.role !== 'customer' && invoice.status === 'confirmed' && invoice.total > invoice.amount_paid,
   };
 }
 
@@ -149,7 +150,9 @@ function runInvoiceAction(db, id, name, user) {
     if (name === 'cancel' && db.prepare('SELECT 1 FROM payments WHERE invoice_id = ? LIMIT 1').get(id)) {
       throw new HttpError(409, 'This invoice has payments and cannot be cancelled.');
     }
-    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(action.to, id);
+    // A ₹0 invoice (for example, fully discounted) has nothing to collect, so confirming it settles it.
+    const status = name === 'confirm' && invoice.total === 0 ? 'paid' : action.to;
+    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, id);
     return getInvoice(db, id, user);
   });
 }

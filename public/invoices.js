@@ -1,7 +1,9 @@
 // Stage 5 screens: invoices created by the billing engine.
 (() => {
   const views = window.BrightloopViews;
-  const { status, bindForms, capitalize } = window.BrightloopUI;
+  const { field, moneyField, select, status, bindForms, toPaise, capitalize } = window.BrightloopUI;
+  const METHOD_LABELS = { bank_transfer: 'Bank transfer', upi: 'UPI', card: 'Card', cash: 'Cash', cheque: 'Cheque', other: 'Other' };
+  window.BrightloopUI.paymentMethods = METHOD_LABELS;
 
   const FLOW = ['draft', 'confirmed', 'paid'];
   const STATUSES = ['draft', 'confirmed', 'paid', 'cancelled'];
@@ -78,16 +80,39 @@
             ['Issue date', e(i.issue_date)], ['Due date', e(i.due_date)]]
             .map(([label, value]) => `<div class="detail-row"><span>${label}</span><strong>${value}</strong></div>`).join('')}
           <h2 class="history-title">Payments</h2>
-          ${i.payments.length ? `<ol class="timeline">${i.payments.map(p => `<li><strong>${ctx.money(p.amount)}</strong> · ${e(p.method)}${p.reference ? ` · ${e(p.reference)}` : ''}<small>${e(p.payment_date)}${p.note ? ` · ${e(p.note)}` : ''}</small></li>`).join('')}</ol>`
-            : '<p class="muted">No payments yet. Recording payments arrives in Stage 6.</p>'}
+          ${i.payments.length ? `<ol class="timeline">${i.payments.map(p => `<li><strong>${ctx.money(p.amount)}</strong> · ${METHOD_LABELS[p.method] ?? e(p.method)}${p.reference ? ` · ${e(p.reference)}` : ''}<small>${e(p.payment_date)}${p.note ? ` · ${e(p.note)}` : ''}</small>
+            <button type="button" class="link-button danger-text" data-click="removePayment" data-payment-id="${p.id}" data-confirm="Remove this ${ctx.money(p.amount)} payment? Only do this for a payment recorded by mistake.">Remove</button></li>`).join('')}</ol>`
+            : `<p class="muted">${i.status === 'draft' ? 'Confirm the invoice to start recording payments.' : 'No payments yet.'}</p>`}
         </section>
-      </div>`;
+      </div>
+      ${i.can_record_payment ? `<section class="panel form-panel-static"><h2>Record payment</h2><p class="panel-intro">Balance due ${ctx.money(i.balance)}. Part payments are fine; the invoice is marked paid when the balance reaches ₹0.</p>
+        <form data-action="recordPayment" class="stack"><div class="form-grid three">
+          ${select(e, 'Method', 'method', [['', 'Select a method'], ...Object.entries(METHOD_LABELS)], '', { required: true })}
+          ${moneyField(e, 'Amount (₹)', 'amount', i.balance, { required: true })}
+          ${field(e, 'Payment date', 'payment_date', { type: 'date', value: localToday(), required: true, attrs: `max="${localToday()}"` })}
+          ${field(e, 'Reference', 'reference', { attrs: 'maxlength="120" placeholder="UTR, cheque or transaction number"' })}
+          ${field(e, 'Note', 'note', { attrs: 'maxlength="500"' })}
+          <div class="form-actions align-end"><button type="submit">Record payment</button></div>
+        </div><span class="form-message" role="status"></span></form></section>` : ''}`;
     return {
       html,
       mount: root => bindForms(root, {
         async runAction(dataset) {
           const updated = await ctx.api(`invoices/${id}/actions/${dataset.actionName}`, { method: 'POST' });
           ctx.notify(`${updated.number} is now ${updated.status}.`);
+          ctx.rerender();
+        },
+        async recordPayment(data) {
+          const body = { method: data.get('method'), amount: toPaise(data.get('amount')), payment_date: data.get('payment_date') };
+          if (data.get('reference').trim()) body.reference = data.get('reference');
+          if (data.get('note').trim()) body.note = data.get('note');
+          const updated = await ctx.api(`invoices/${id}/payments`, { method: 'POST', body });
+          ctx.notify(updated.status === 'paid' ? `${updated.number} is fully paid.` : `Payment recorded. ${ctx.money(updated.balance)} still due.`);
+          ctx.rerender();
+        },
+        async removePayment(dataset) {
+          await ctx.api(`payments/${dataset.paymentId}`, { method: 'DELETE' });
+          ctx.notify('Payment removed.');
           ctx.rerender();
         },
       }, ctx),
