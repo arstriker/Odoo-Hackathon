@@ -10,6 +10,7 @@ import { closeExpiredSubscriptions, routes as subscriptionRoutes } from './subsc
 import { runBilling, routes as billingRoutes } from './billing.js';
 import { routes as paymentRoutes } from './payments.js';
 import { routes as discountRoutes } from './discounts.js';
+import { routes as financeRoutes } from './finance.js';
 
 const collections = {
   customers: "SELECT id,name,email,created_at FROM users WHERE role = 'customer' ORDER BY id DESC LIMIT 100",
@@ -21,7 +22,18 @@ const collections = {
   discounts: 'SELECT id,name,type,value,start_date,end_date,usage_count,usage_limit FROM discounts ORDER BY id DESC LIMIT 100',
   settings: 'SELECT id,name,rate_basis_points,active FROM tax_rules ORDER BY id DESC LIMIT 100',
 };
-const assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/manage.js': 'manage.js', '/subscriptions.js': 'subscriptions.js', '/invoices.js': 'invoices.js', '/payments.js': 'payments.js', '/discounts.js': 'discounts.js', '/styles.css': 'styles.css' };
+const assets = {
+  '/': 'index.html',
+  '/index.html': 'index.html',
+  '/app.js': 'app.js',
+  '/manage.js': 'manage.js',
+  '/subscriptions.js': 'subscriptions.js',
+  '/invoices.js': 'invoices.js',
+  '/payments.js': 'payments.js',
+  '/discounts.js': 'discounts.js',
+  '/finance.js': 'finance.js',
+  '/styles.css': 'styles.css',
+};
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 // Route patterns such as '/api/products/:id' compiled to regular expressions with named groups.
@@ -30,7 +42,7 @@ const compile = list => list.map(([method, pattern, handler]) => ({
   handler,
   regex: new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`),
 }));
-const apiRoutes = compile([...catalogRoutes, ...subscriptionRoutes, ...billingRoutes, ...paymentRoutes, ...discountRoutes]);
+const apiRoutes = compile([...catalogRoutes, ...subscriptionRoutes, ...billingRoutes, ...paymentRoutes, ...discountRoutes, ...financeRoutes]);
 
 export function createApp(db, { authenticate = () => developmentUser } = {}) {
   return createServer(async (req, res) => {
@@ -59,7 +71,7 @@ export function createApp(db, { authenticate = () => developmentUser } = {}) {
         const counts = {};
         for (const table of ['products','plans','subscriptions','invoices','payments','discounts']) counts[table] = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
         counts.customers = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='customer'").get().count;
-        return json(200, { counts, stage: 5, currency: 'INR' });
+        return json(200, { counts, stage: 7, currency: 'INR' });
       }
       if (path.startsWith('/api/')) {
         const query = collections[path.slice(5)];

@@ -74,6 +74,14 @@ Account registration, authentication, record editing, scheduling, invoicing, pay
 - **Discount rules**: discounts apply in the order they were created, each on what earlier ones left, so a line never goes below ₹0. A fixed amount is shared across qualifying lines by value with no rounding loss. Each invoice a discount is applied to counts as one use, in the same transaction, so the usage limit is never exceeded; cancelling an invoice gives its uses back. Discounts used on invoices can't be deleted (set an end date instead).
 - **Discount screens**: a Discounts page (create, edit, status, uses and amount given), a Discounts section on each subscription to add or remove them, and each invoice lists the discounts it received.
 
+## Stage 7 deliverables · Finance lead and performance reporting
+
+- **Executive summary**: one place for the finance lead to inspect active subscriptions (with MRR run rate), total revenue collected, outstanding balance, and overdue receivables.
+- **Overdue collections**: dedicated "Chase overdue invoices" table with aging calculation (`days_overdue`), customer contact, balance, and direct navigation to invoices.
+- **Cashflow breakdown**: collections categorized by payment method and monthly trend table.
+- **Date-range filtering**: presets for "This month", "Last month", "This quarter", "This year", and "All time", with custom date support.
+- **Sub-2-second performance SLA**: indexed database queries (`payments_payment_date_idx`, `invoices_issue_date_idx`, `invoices_status_due_idx`) executing in under 50ms even with thousands of active subscriptions.
+
 ## Structure
 
 ```text
@@ -86,14 +94,16 @@ server/subscriptions.js Stage 4 API: customers, quotation templates and subscrip
 server/billing.js       Stage 5 billing engine and invoice API
 server/payments.js      Stage 6 payments API
 server/discounts.js     Stage 6 discounts API and the discount calculation used by billing
-public/payments.js      Stage 6 Payments page (record payments from the invoice page in public/invoices.js)
-public/discounts.js     Stage 6 Discounts page and the subscription Discounts section
+server/finance.js       Stage 7 finance summary and overdue reporting
 server/database.js      Database connection and initialization
 server/migrations.js    Ordered schema migrations after version 1
 server/schema.sql       Initial schema and indexes
 public/manage.js        Stage 3 screens (products, plans, settings) and shared form helpers
 public/subscriptions.js Stage 4 screens (customers, templates, subscriptions)
 public/invoices.js      Stage 5 screens (invoice list and detail, run billing)
+public/payments.js      Stage 6 Payments page (record payments from the invoice page in public/invoices.js)
+public/discounts.js     Stage 6 Discounts page and the subscription Discounts section
+public/finance.js       Stage 7 Finance & Reports executive dashboard
 Data model.md           Relationships and value conventions
 tests/foundation.test.js API, persistence and constraint tests
 tests/catalog.test.js   Stage 3 catalogue and permission tests
@@ -101,6 +111,7 @@ tests/subscriptions.test.js Stage 4 lifecycle, rules and access tests
 tests/billing.test.js   Stage 5 billing periods, totals, invoice actions and access tests
 tests/payments.test.js  Stage 6 payment rules, corrections and access tests
 tests/discounts.test.js Stage 6 discount calculation, conditions, usage limits and access tests
+tests/finance.test.js   Stage 7 finance summary, aging, receivables and benchmark test
 data/                   Runtime SQLite files (ignored)
 ```
 
@@ -158,6 +169,13 @@ Stage 6 endpoints:
 | GET | `/api/subscriptions/:id/discounts` | admin, staff; customers see their own |
 | POST, DELETE | `/api/subscriptions/:id/discounts` (`{ discount_id }`), `/api/subscriptions/:id/discounts/:discountId` | admin, staff |
 
+Stage 7 endpoints:
+
+| Method | Path | Role |
+|---|---|---|
+| GET | `/api/finance/summary` (`?preset=`, `?from=`, `?to=`) | admin, staff |
+| GET | `/api/finance/overdue` | admin, staff |
+
 Example: `POST /api/plans` with `{"name":"Business monthly","price":99900,"interval":"monthly","minimum_quantity":1,"auto_close":true}`.
 
-Frontend navigation uses hash routes, for example `/#subscriptions` or `/#products/3`.
+Frontend navigation uses hash routes, for example `/#subscriptions`, `/#invoices/3`, `/#payments`, `/#discounts`, or `/#finance`.

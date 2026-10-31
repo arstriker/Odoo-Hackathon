@@ -40,6 +40,16 @@ export const migrations = [
       ALTER TABLE subscriptions ADD COLUMN term_intervals INTEGER CHECK(term_intervals > 0);
     `,
   },
+  {
+    version: 5,
+    description: 'Reporting and date performance indexes for finance and payments',
+    sql: `
+      CREATE INDEX IF NOT EXISTS payments_payment_date_idx ON payments(payment_date);
+      CREATE INDEX IF NOT EXISTS invoices_issue_date_idx ON invoices(issue_date);
+      CREATE INDEX IF NOT EXISTS invoices_status_due_idx ON invoices(status, due_date);
+      CREATE INDEX IF NOT EXISTS discounts_dates_idx ON discounts(start_date, end_date);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = Math.max(1, ...migrations.map(migration => migration.version));
