@@ -6,6 +6,7 @@ import { openDatabase, projectRoot } from './database.js';
 import { developmentUser } from './access.js';
 import { HttpError, readJson } from './http.js';
 import { routes as catalogRoutes } from './catalog.js';
+import { closeExpiredSubscriptions, routes as subscriptionRoutes } from './subscriptions.js';
 
 const collections = {
   customers: "SELECT id,name,email,created_at FROM users WHERE role = 'customer' ORDER BY id DESC LIMIT 100",
@@ -17,7 +18,7 @@ const collections = {
   discounts: 'SELECT id,name,type,value,start_date,end_date,usage_count,usage_limit FROM discounts ORDER BY id DESC LIMIT 100',
   settings: 'SELECT id,name,rate_basis_points,active FROM tax_rules ORDER BY id DESC LIMIT 100',
 };
-const assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/manage.js': 'manage.js', '/styles.css': 'styles.css' };
+const assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/manage.js': 'manage.js', '/subscriptions.js': 'subscriptions.js', '/styles.css': 'styles.css' };
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 // Route patterns such as '/api/products/:id' compiled to regular expressions with named groups.
@@ -26,7 +27,7 @@ const compile = list => list.map(([method, pattern, handler]) => ({
   handler,
   regex: new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`),
 }));
-const apiRoutes = compile([...catalogRoutes]);
+const apiRoutes = compile([...catalogRoutes, ...subscriptionRoutes]);
 
 export function createApp(db, { authenticate = () => developmentUser } = {}) {
   return createServer(async (req, res) => {
@@ -48,14 +49,14 @@ export function createApp(db, { authenticate = () => developmentUser } = {}) {
         const result = await found.route.handler({ db, req, user, body, params: found.match.groups ?? {}, query: url.searchParams });
         return result && Number.isInteger(result.status) && Object.hasOwn(result, 'data') ? json(result.status, result.data) : json(200, result);
       }
-      if (matches.length) return json(405, { error: 'This method is not supported for this endpoint.' });
+      // Paths with write routes but no GET route (such as /api/customers) still fall back to the read-only collections below.
       if (req.method !== 'GET') return json(405, { error: 'This method is not supported for this endpoint.' });
       if (path === '/api/health') return json(200, { status: 'ok', database: db.prepare('SELECT 1 AS connected').get().connected === 1 ? 'connected' : 'unavailable', schemaVersion: db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version });
       if (path === '/api/overview') {
         const counts = {};
         for (const table of ['products','plans','subscriptions','invoices','payments','discounts']) counts[table] = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
         counts.customers = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='customer'").get().count;
-        return json(200, { counts, stage: 3, currency: 'INR' });
+        return json(200, { counts, stage: 4, currency: 'INR' });
       }
       if (path.startsWith('/api/')) {
         const query = collections[path.slice(5)];
@@ -80,6 +81,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const server = createApp(db);
   const host = process.env.HOST || '127.0.0.1';
   const port = Number(process.env.PORT || 3000);
+  // Plans set to close automatically are checked at start-up and every hour.
+  const closeExpired = () => { try { const closed = closeExpiredSubscriptions(db); if (closed) console.log(`Closed ${closed} expired subscription(s).`); } catch (error) { console.error(error); } };
+  closeExpired();
+  const timer = setInterval(closeExpired, 60 * 60 * 1000);
+  timer.unref();
   server.listen(port, host, () => console.log(`Brightloop running at http://${host}:${port}`));
-  for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => server.close(() => { db.close(); process.exit(0); }));
+  for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => { clearInterval(timer); server.close(() => { db.close(); process.exit(0); }); });
 }

@@ -58,7 +58,7 @@ test('HTTP serves UI and database-backed read-only collections', async () => {
     }
     assert.equal((await fetch(`${base}/api/missing`)).status,404);
     assert.equal((await fetch(`${base}/package.json`)).status,404);
-    assert.equal((await fetch(`${base}/api/customers`,{method:'POST'})).status,405);
+    assert.equal((await fetch(`${base}/api/customers`,{method:'DELETE'})).status,405);
   } finally {
     await new Promise(resolve => server.close(resolve));
     db.close();

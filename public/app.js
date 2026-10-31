@@ -3,6 +3,7 @@ const modules = {
   customers: { title: 'Customers', icon: '♧', stage: 2, description: 'Customer accounts and contact details will live here.', columns: ['Name','Email','Created'], fields: ['name','email','created_at'] },
   products: { title: 'Products', icon: '◇', stage: 3, description: 'Organize your software products, prices and variants.', columns: ['Product','Type','Sales price','Cost price'], fields: ['name','type','sales_price','cost_price'] },
   plans: { title: 'Plans', icon: '▤', stage: 3, description: 'Define recurring prices, billing intervals and plan policies.', columns: ['Plan','Price','Billing interval','Minimum quantity'], fields: ['name','price','interval','minimum_quantity'] },
+  templates: { title: 'Quotation templates', icon: '❏', stage: 4, description: 'Reusable quotations with a plan, product lines and validity.', columns: [], fields: [] },
   subscriptions: { title: 'Subscriptions', icon: '↻', stage: 4, description: 'Track every subscription from quotation to renewal.', columns: ['Number','Customer','Plan','Status','Next billing'], fields: ['number','customer','plan','status','next_billing_date'] },
   invoices: { title: 'Invoices', icon: '▧', stage: 5, description: 'Recurring invoices, taxes and outstanding balances in one place.', columns: ['Invoice','Customer','Status','Due date','Total'], fields: ['number','customer_name','status','due_date','total'] },
   payments: { title: 'Payments', icon: '↗', stage: 6, description: 'Record incoming payments and match them to invoices.', columns: ['Invoice','Method','Amount','Date'], fields: ['invoice','method','amount','payment_date'] },
@@ -52,7 +53,9 @@ function moduleView(key, data) {
 let revision = 0;
 async function render() {
   const current = ++revision;
-  const [route, id] = location.hash.slice(1).split('/');
+  // Hash routes look like #plans, #plans/3, #subscriptions?status=active or #subscriptions/new?template=2.
+  const [routePart, id] = location.hash.slice(1).split('/');
+  const route = routePart.split('?')[0];
   const key = Object.hasOwn(modules, route) ? route : 'overview';
   const view = window.BrightloopViews?.[key];
   const title = modules[key].title;

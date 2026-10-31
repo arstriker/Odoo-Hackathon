@@ -59,6 +59,9 @@
     });
   }
 
+  // Shared with the Stage 4 screens in subscriptions.js.
+  window.BrightloopUI = { field, moneyField, select, checkbox, status, bindForms, toPaise, toRupees, capitalize };
+
   // ---------- Products ----------
   const productForm = (e, product = {}) => `
     <div class="form-grid">
