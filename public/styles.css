@@ -28,3 +28,4 @@ tfoot td{font-size:12px;color:#5f6d65;border-bottom:0;padding-top:10px;padding-b
 .action-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;align-items:center}h1 .pill{font-size:12px;vertical-align:middle;letter-spacing:0;font-weight:500}
 .history-title{margin-top:24px}.timeline{list-style:none;padding:0;margin:10px 0 0;border-left:2px solid #e1e9e3}.timeline li{position:relative;padding:0 0 14px 16px;font-size:12px;color:#516158}.timeline li:before{content:'';position:absolute;left:-6px;top:4px;width:10px;height:10px;border-radius:50%;background:#34a97b}.timeline strong{color:#20312b;font-weight:600;margin-right:6px}
 @media(max-width:1050px){.line-row{grid-template-columns:1fr 1fr 1fr}}@media(max-width:640px){.line-row{grid-template-columns:1fr 1fr}.line-row .field:first-child{grid-column:1/-1}.toolbar .button{width:100%;text-align:center}}
+.two-column+.panel{margin-top:22px}
