@@ -191,3 +191,81 @@ test('templates in use cannot be deleted', async () => {
     assert.equal((await app.staff('DELETE', `/quotation-templates/${unused.id}`)).status, 200);
   } finally { await app.stop(); }
 });
+
+test('every renewal extends by the original term, not the growing one', async () => {
+  const app = await startApp();
+  try {
+    const { product, plan } = await catalogue(app.admin, { allow_renew: true });
+    const sub = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, start_date: '2027-01-01', expiry_date: '2027-04-01', lines: [{ product_id: product.id, quantity: 2 }] })).body;
+    for (const action of ['confirm', 'activate']) await app.staff('POST', `/subscriptions/${sub.id}/actions/${action}`);
+    const expiries = [];
+    for (let i = 0; i < 3; i += 1) expiries.push((await app.staff('POST', `/subscriptions/${sub.id}/actions/renew`)).body.expiry_date);
+    assert.deepEqual(expiries, ['2027-07-01', '2027-10-01', '2028-01-01']);
+  } finally { await app.stop(); }
+});
+
+test('unknown and built-in action names are rejected with 404, not a crash', async () => {
+  const app = await startApp();
+  try {
+    const { product, plan } = await catalogue(app.admin);
+    const sub = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, lines: [{ product_id: product.id, quantity: 2 }] })).body;
+    for (const name of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'nope']) {
+      assert.equal((await app.staff('POST', `/subscriptions/${sub.id}/actions/${name}`)).status, 404, name);
+    }
+    for (const action of ['confirm', 'activate']) await app.staff('POST', `/subscriptions/${sub.id}/actions/${action}`);
+    assert.match((await app.staff('POST', `/subscriptions/${sub.id}/actions/send`)).body.error, /^An active subscription/);
+  } finally { await app.stop(); }
+});
+
+test('editing a tax rule does not change existing subscription totals', async () => {
+  const app = await startApp();
+  try {
+    const { product, tax, plan } = await catalogue(app.admin);
+    const sub = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, lines: [{ product_id: product.id, quantity: 2, tax_rule_id: tax.id }] })).body;
+    assert.equal(sub.totals.tax_total, 36000);
+    assert.equal((await app.admin('PATCH', `/tax-rules/${tax.id}`, { rate_basis_points: 2800 })).status, 200);
+    const after = (await app.staff('GET', `/subscriptions/${sub.id}`)).body;
+    assert.equal(after.totals.tax_total, 36000);
+    assert.equal(after.lines[0].tax_rate_basis_points, 1800);
+    // New lines pick up the new rate.
+    const fresh = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, lines: [{ product_id: product.id, quantity: 2, tax_rule_id: tax.id }] })).body;
+    assert.equal(fresh.totals.tax_total, 56000);
+  } finally { await app.stop(); }
+});
+
+test('plan terms are locked once a subscription is confirmed', async () => {
+  const app = await startApp();
+  try {
+    const { product, plan } = await catalogue(app.admin);
+    const sub = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, lines: [{ product_id: product.id, quantity: 2 }] })).body;
+    // Drafts do not lock the plan.
+    assert.equal((await app.admin('PATCH', `/plans/${plan.id}`, { minimum_quantity: 1 })).status, 200);
+    await app.staff('POST', `/subscriptions/${sub.id}/actions/confirm`);
+    assert.equal((await app.admin('PATCH', `/plans/${plan.id}`, { interval: 'daily' })).status, 409);
+    assert.equal((await app.admin('PATCH', `/plans/${plan.id}`, { minimum_quantity: 5 })).status, 409);
+    // Other plan settings, and resending the same values, are still allowed.
+    assert.equal((await app.admin('PATCH', `/plans/${plan.id}`, { name: 'Monthly v2', interval: 'monthly', allow_pause: true })).status, 200);
+  } finally { await app.stop(); }
+});
+
+test('confirmed subscriptions that expire before activation are closed', async () => {
+  const app = await startApp();
+  try {
+    const { product, plan } = await catalogue(app.admin);
+    const sub = (await app.staff('POST', '/subscriptions', { customer_id: 3, plan_id: plan.id, start_date: '2026-01-01', expiry_date: '2026-03-31', lines: [{ product_id: product.id, quantity: 2 }] })).body;
+    app.db.prepare("UPDATE subscriptions SET status = 'confirmed' WHERE id = ?").run(sub.id);
+    assert.equal(closeExpiredSubscriptions(app.db, '2026-04-01'), 1);
+    const closed = (await app.staff('GET', `/subscriptions/${sub.id}`)).body;
+    assert.equal(closed.status, 'closed');
+    assert.match(closed.events.at(-1).note, /before activation/);
+  } finally { await app.stop(); }
+});
+
+test('only staff and admins can list customers', async () => {
+  const app = await startApp();
+  try {
+    assert.equal((await app.staff('GET', '/customers')).status, 200);
+    assert.equal((await app.alice('GET', '/customers')).status, 403);
+    assert.equal((await app.anonymous('GET', '/customers')).status, 401);
+  } finally { await app.stop(); }
+});

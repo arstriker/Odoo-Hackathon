@@ -32,21 +32,21 @@ Optional shell environment variables: `PORT`, `HOST`, `DATABASE_PATH`. `.env.exa
 ## Stage 3 deliverables · Product catalogue and plans
 
 - **Products**: create, edit, archive and delete products with name, type, sales price, cost price and notes. Products already used on templates, subscriptions, invoices or discounts are archived instead of deleted.
-- **Variants**: price-changing variants per product (for example Brand: Odoo adds ₹560). Duplicate attribute/value pairs are rejected.
+- **Variants**: price-changing variants per product (for example Brand: Odoo adds ₹560). Duplicate attribute/value pairs are rejected, and a variant cannot make the product price negative.
 - **Tax rules**: create, activate/deactivate and delete tax rules (Settings page). Rules in use are deactivated instead of deleted.
-- **Recurring plans**: price, billing frequency (daily, weekly, monthly, yearly), minimum quantity, availability dates and lifecycle settings (auto-close at end, close early, pause, renew).
+- **Recurring plans**: price, billing frequency (daily, weekly, monthly, yearly), minimum quantity, availability dates and lifecycle settings (auto-close at end, close early, pause, renew). Billing frequency and minimum quantity cannot change once a plan has confirmed or running subscriptions.
 - Catalogue changes are admin-only on the backend (`403` for staff and customers, `401` when signed out).
 
 ## Stage 4 deliverables · Quotations and subscriptions
 
 - **Customers**: staff and admins can add customer accounts (name and email, one account per email) to quote for.
 - **Quotation templates**: a plan, product lines, validity in days and payment terms. Starting a quotation from a template copies all of these.
-- **Subscriptions**: unique numbers (`SUB-00001`), customer, plan, start and expiry dates, quotation validity, payment terms, notes and product lines with quantity, unit price, taxes and amounts. Lines default to the catalogue price plus the variant adjustment.
-- **Lifecycle**: Draft → Quotation → Confirmed → Active → Closed, plus pause/resume and renewal while active. Pause, renew and early closing are only offered when the plan allows them. Renewal extends the expiry date by the original term length.
+- **Subscriptions**: unique numbers (`SUB-00001`), customer, plan, start and expiry dates, quotation validity, payment terms, notes and product lines with quantity, unit price, taxes and amounts. Lines default to the catalogue price plus the variant adjustment. Each line keeps the tax rate it was created with, so editing a tax rule later does not change existing documents.
+- **Lifecycle**: Draft → Quotation → Confirmed → Active → Closed, plus pause/resume and renewal while active. Pause, renew and early closing are only offered when the plan allows them. Every renewal extends the expiry date by the original term length.
 - **Rules**: line quantities respect the plan minimum, the start date must fall within plan availability, expired quotations cannot be confirmed, and only draft/quotation subscriptions can be edited. Only drafts can be deleted.
-- **Automatic closing**: subscriptions on plans set to close automatically are closed after their expiry date (checked at start-up and hourly).
-- **History**: every status change is recorded with who made it, shown on the subscription page.
-- **Access**: admins and staff manage quotations; customers can only read their own subscriptions.
+- **Automatic closing**: subscriptions on plans set to close automatically are closed after their expiry date, and confirmed subscriptions that expire before activation are closed too (checked at start-up and hourly).
+- **History**: every status change is recorded and shown on the subscription page. The user who made it is recorded once Stage 2 sign-in is in place; the local development admin has no account, so its changes show no user.
+- **Access**: admins and staff manage quotations and list customers; customers can only read their own subscriptions.
 
 Until Stage 2 adds sign-in, the server uses a local development admin (`server/access.js`). Stage 2 plugs in real authentication with `createApp(db, { authenticate })`, where `authenticate(req, db)` returns `{ id, role }` or `null`.
 

@@ -11,7 +11,8 @@
   ];
 
   // ₹ in forms, paise in the API.
-  const toPaise = value => Math.round(Number(value || 0) * 100);
+  // Blank stays blank (null) so the server can report a missing required price instead of saving ₹0.
+  const toPaise = value => (value == null || String(value).trim() === '' ? null : Math.round(Number(value) * 100));
   const toRupees = paise => (paise / 100).toFixed(2).replace(/\.00$/, '');
 
   const field = (e, label, name, { type = 'text', value = '', required = false, attrs = '', hint = '' } = {}) => `
@@ -74,7 +75,7 @@
     <label class="field"><span>Notes</span><textarea name="notes" rows="3" maxlength="2000">${e(product.notes ?? '')}</textarea></label>`;
   const productBody = data => ({
     name: data.get('name'), type: data.get('type') || 'software', notes: data.get('notes') ?? '',
-    sales_price: toPaise(data.get('sales_price')), cost_price: toPaise(data.get('cost_price')),
+    sales_price: toPaise(data.get('sales_price')), cost_price: toPaise(data.get('cost_price')) ?? 0,
   });
   const variantLabel = (ctx, variant) => `${variant.attribute}: ${variant.value} (${variant.price_adjustment >= 0 ? '+' : '−'}${ctx.money(Math.abs(variant.price_adjustment))})`;
 
