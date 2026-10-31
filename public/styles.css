@@ -33,3 +33,16 @@ button.link-button{background:none;border:0;padding:0;margin-top:4px}.link-butto
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.search-field{flex:1;max-width:420px;margin:0}
 form.toolbar{justify-content:flex-start}
 .panel-pad{padding:18px 24px;margin:0}.module-panel+.module-panel{margin-top:22px}
+
+/* Stage 2: Authentication modals and user badges */
+.auth-bar{display:flex;align-items:center;gap:10px}
+.auth-user-badge{display:flex;align-items:center;gap:8px;font-size:12px;background:#f7faf8;border:1px solid #dfe7e2;border-radius:20px;padding:3px 8px 3px 12px}
+.auth-user-badge .user-name{font-weight:600;color:#2c4336}
+.auth-actions{display:flex;gap:8px}
+.modal-backdrop{position:fixed;inset:0;background:rgba(18,33,26,0.48);backdrop-filter:blur(2px);display:none;place-items:center;padding:16px;z-index:999}
+.modal-backdrop.open{display:grid}
+.modal{background:#fff;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,0.18);width:100%;max-width:440px;border:1px solid #e1e9e3;overflow:hidden}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid #edf1ee}
+.modal-header h2{font-size:18px;margin:0;color:#153f30}
+.modal-close{background:transparent;border:0;color:#7a877f;font-size:18px;cursor:pointer;padding:4px 8px}
+.modal-close:hover{color:#20312b}

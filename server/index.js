@@ -11,6 +11,7 @@ import { runBilling, routes as billingRoutes } from './billing.js';
 import { routes as paymentRoutes } from './payments.js';
 import { routes as discountRoutes } from './discounts.js';
 import { routes as financeRoutes } from './finance.js';
+import { routes as authRoutes, authenticate as authAuthenticate, ensureDefaultAdmin } from './auth.js';
 
 const collections = {
   customers: "SELECT id,name,email,created_at FROM users WHERE role = 'customer' ORDER BY id DESC LIMIT 100",
@@ -26,6 +27,7 @@ const assets = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/app.js': 'app.js',
+  '/auth.js': 'auth.js',
   '/manage.js': 'manage.js',
   '/subscriptions.js': 'subscriptions.js',
   '/invoices.js': 'invoices.js',
@@ -42,14 +44,16 @@ const compile = list => list.map(([method, pattern, handler]) => ({
   handler,
   regex: new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`),
 }));
-const apiRoutes = compile([...catalogRoutes, ...subscriptionRoutes, ...billingRoutes, ...paymentRoutes, ...discountRoutes, ...financeRoutes]);
+const apiRoutes = compile([...authRoutes, ...catalogRoutes, ...subscriptionRoutes, ...billingRoutes, ...paymentRoutes, ...discountRoutes, ...financeRoutes]);
 
-export function createApp(db, { authenticate = () => developmentUser } = {}) {
+const defaultAuthenticate = (req, db) => authAuthenticate(req, db) ?? developmentUser;
+
+export function createApp(db, { authenticate = defaultAuthenticate } = {}) {
   return createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'");
-    const json = (status, data) => {
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    const json = (status, data, extraHeaders = {}) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders });
       res.end(JSON.stringify(data));
     };
     try {
@@ -61,8 +65,10 @@ export function createApp(db, { authenticate = () => developmentUser } = {}) {
         let parsed;
         const body = async () => (parsed ??= await readJson(req));
         const user = await authenticate(req, db);
-        const result = await found.route.handler({ db, req, user, body, params: found.match.groups ?? {}, query: url.searchParams });
-        return result && Number.isInteger(result.status) && Object.hasOwn(result, 'data') ? json(result.status, result.data) : json(200, result);
+        const result = await found.route.handler({ db, req, res, user, body, params: found.match.groups ?? {}, query: url.searchParams });
+        return result && Number.isInteger(result.status) && Object.hasOwn(result, 'data')
+          ? json(result.status, result.data, result.headers ?? {})
+          : (result && result.headers ? json(200, result.data ?? result, result.headers) : json(200, result));
       }
       // Paths with write routes but no GET route (such as /api/customers) still fall back to the read-only collections below.
       if (req.method !== 'GET') return json(405, { error: 'This method is not supported for this endpoint.' });
@@ -93,7 +99,8 @@ export function createApp(db, { authenticate = () => developmentUser } = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const db = openDatabase();
-  const server = createApp(db);
+  ensureDefaultAdmin(db);
+  const server = createApp(db, { authenticate: authAuthenticate });
   const host = process.env.HOST || '127.0.0.1';
   const port = Number(process.env.PORT || 3000);
   // At start-up and every hour: close expired subscriptions on auto-close plans, then invoice due ones.

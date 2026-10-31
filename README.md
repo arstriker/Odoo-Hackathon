@@ -30,6 +30,18 @@ Optional shell environment variables: `PORT`, `HOST`, `DATABASE_PATH`. `.env.exa
 - Overview counts and module lists read from the database. There is no sample revenue or fabricated business data.
 - API loading, empty and error states with retry.
 
+## Stage 2 deliverables · Accounts, authentication and permissions
+
+- **Customer registration**: `POST /api/auth/register` creates unique accounts with strict password complexity policy (>8 chars, uppercase, lowercase, special character), hashes securely using Node.js standard `node:crypto` (`scryptSync`), and logs in automatically.
+- **Session authentication**: `POST /api/auth/login`, `POST /api/auth/logout`, and `GET /api/auth/me`. Session tokens stored in database `sessions` table, supported via `Authorization: Bearer <token>`, `x-session-token`, or HTTP cookies.
+- **Password reset flow**: `POST /api/auth/forgot-password` generates time-limited reset tokens; `POST /api/auth/reset-password` validates token and complexity policy, updates password, and invalidates all existing sessions.
+- **Role-based access control**:
+  - `admin`: Unrestricted access to entire system, including staff provisioning, payments deletion, and catalogue editing.
+  - `staff`: Day-to-day operational management (customer records, quotations, subscriptions, invoices, payments, discounts).
+  - `customer`: Strict tenant isolation; customers view only their own subscriptions, confirmed/paid invoices, and payments.
+- **Staff management**: `POST /api/staff` and `GET /api/staff` strictly limited to admins.
+- **Frontend auth interface**: Integrated topbar profile badge, sign-in/registration modals, and dedicated Staff & Customers management views.
+
 ## Stage 3 deliverables · Product catalogue and plans
 
 - **Products**: create, edit, archive and delete products with name, type, sales price, cost price and notes. Products already used on templates, subscriptions, invoices or discounts are archived instead of deleted.
@@ -49,9 +61,9 @@ Optional shell environment variables: `PORT`, `HOST`, `DATABASE_PATH`. `.env.exa
 - **History**: every status change is recorded and shown on the subscription page. The user who made it is recorded once Stage 2 sign-in is in place; the local development admin has no account, so its changes show no user.
 - **Access**: admins and staff manage quotations and list customers; customers can only read their own subscriptions.
 
-Until Stage 2 adds sign-in, the server uses a local development admin (`server/access.js`). Stage 2 plugs in real authentication with `createApp(db, { authenticate })`, where `authenticate(req, db)` returns `{ id, role }` or `null`.
 
-Account registration, authentication, record editing, scheduling, invoicing, payments and analytical reporting belong to subsequent stages. This foundation has no authentication yet: use it locally with development data. Existing endpoints are read-only and collection responses are limited to 100 records; pagination comes with the management modules.
+
+
 
 ## Stage 5 deliverables · Billing
 
@@ -87,9 +99,11 @@ Account registration, authentication, record editing, scheduling, invoicing, pay
 
 ```text
 public/                 Browser interface: HTML, CSS and JavaScript
+public/auth.js          Stage 2 sign-in, customer registration, password reset and staff views
 server/index.js         HTTP server, routing and read-only collections
 server/http.js          Request parsing, validation, date and transaction helpers
 server/access.js        Role checks and the Stage 2 authentication hook
+server/auth.js          Stage 2 authentication, password hashing, session and staff management
 server/catalog.js       Stage 3 API: products, variants, tax rules and plans
 server/subscriptions.js Stage 4 API: customers, quotation templates and subscription lifecycle
 server/billing.js       Stage 5 billing engine and invoice API
@@ -107,6 +121,7 @@ public/discounts.js     Stage 6 Discounts page and the subscription Discounts se
 public/finance.js       Stage 7 Finance & Reports executive dashboard
 Data model.md           Relationships and value conventions
 tests/foundation.test.js API, persistence and constraint tests
+tests/auth.test.js       Stage 2 password policy, session authentication, reset and RBAC tests
 tests/catalog.test.js   Stage 3 catalogue and permission tests
 tests/subscriptions.test.js Stage 4 lifecycle, rules and access tests
 tests/billing.test.js   Stage 5 billing periods, totals, invoice actions and access tests
@@ -121,6 +136,18 @@ data/                   Runtime SQLite files (ignored)
 `GET /api/health` returns database connectivity and schema version.
 `GET /api/overview` returns counts and currency.
 `GET /api/{customers,products,plans,subscriptions,invoices,payments,discounts,settings}` returns `{ items, limit }`. Settings currently lists tax rules.
+
+Stage 2 endpoints:
+
+| Method | Path | Role |
+|---|---|---|
+| POST | `/api/auth/register` (`{ name, email, password }`) | any (public) |
+| POST | `/api/auth/login` (`{ email, password }`) | any (public) |
+| POST | `/api/auth/logout` | any |
+| GET | `/api/auth/me` | any (returns `{ user }` or `{ user: null }`) |
+| POST | `/api/auth/forgot-password` (`{ email }`) | any (public) |
+| POST | `/api/auth/reset-password` (`{ token, password }`) | any (public) |
+| GET, POST | `/api/staff` (`POST: { name, email, password }`) | admin |
 
 Stage 3 write endpoints (JSON bodies; money in paise, rates in basis points, dates `YYYY-MM-DD`):
 

@@ -50,6 +50,26 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS discounts_dates_idx ON discounts(start_date, end_date);
     `,
   },
+  {
+    version: 6,
+    description: 'Sessions and password reset tokens for user authentication',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS reset_tokens_user_idx ON password_reset_tokens(user_id);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = Math.max(1, ...migrations.map(migration => migration.version));

@@ -2,6 +2,7 @@ const modules = {
   overview: { title: 'Overview', icon: '◫' },
   finance: { title: 'Finance & Reports', icon: '📊', stage: 7, description: 'Executive dashboard for active subscriptions, cash collection, outstanding balances and overdue invoices.' },
   customers: { title: 'Customers', icon: '♧', stage: 2, description: 'Customer accounts and contact details will live here.', columns: ['Name','Email','Created'], fields: ['name','email','created_at'] },
+  staff: { title: 'Staff', icon: '🛡', stage: 2, description: 'Manage internal staff accounts and access permissions.' },
   products: { title: 'Products', icon: '◇', stage: 3, description: 'Organize your software products, prices and variants.', columns: ['Product','Type','Sales price','Cost price'], fields: ['name','type','sales_price','cost_price'] },
   plans: { title: 'Plans', icon: '▤', stage: 3, description: 'Define recurring prices, billing intervals and plan policies.', columns: ['Plan','Price','Billing interval','Minimum quantity'], fields: ['name','price','interval','minimum_quantity'] },
   templates: { title: 'Quotation templates', icon: '❏', stage: 4, description: 'Reusable quotations with a plan, product lines and validity.', columns: [], fields: [] },
@@ -67,7 +68,17 @@ async function render() {
   const title = modules[key].title;
   document.title = `${title} · Brightloop`;
   document.querySelector('#breadcrumb').textContent = title;
-  document.querySelector('#navigation').innerHTML = Object.entries(modules).map(([name,item])=>`<a class="nav-link ${name === key ? 'active' : ''}" ${name === key ? 'aria-current="page"' : ''} href="#${name}"><span class="nav-icon" aria-hidden="true">${item.icon}</span>${item.title}</a>`).join('');
+  const user = window.BrightloopAuth?.currentUser;
+  const visibleModules = Object.entries(modules).filter(([name]) => {
+    if (user?.role === 'customer') {
+      return ['overview', 'subscriptions', 'invoices', 'payments'].includes(name);
+    }
+    if (user?.role === 'staff') {
+      return name !== 'staff';
+    }
+    return true;
+  });
+  document.querySelector('#navigation').innerHTML = visibleModules.map(([name,item])=>`<a class="nav-link ${name === key ? 'active' : ''}" ${name === key ? 'aria-current="page"' : ''} href="#${name}"><span class="nav-icon" aria-hidden="true">${item.icon}</span>${item.title}</a>`).join('');
   content.innerHTML = '<p class="subtitle" role="status">Loading workspace…</p>';
   try {
     if (view) {
@@ -88,4 +99,5 @@ async function render() {
   }
 }
 window.addEventListener('hashchange',render);
+window.addEventListener('auth-changed',render);
 render();
