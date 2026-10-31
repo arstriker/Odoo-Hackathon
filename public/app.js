@@ -1,0 +1,53 @@
+const modules = {
+  overview: { title: 'Overview', icon: '◫' },
+  customers: { title: 'Customers', icon: '♧', stage: 2, description: 'Customer accounts and contact details will live here.', columns: ['Name','Email','Created'], fields: ['name','email','created_at'] },
+  products: { title: 'Products', icon: '◇', stage: 3, description: 'Organize your software products, prices and variants.', columns: ['Product','Type','Sales price','Cost price'], fields: ['name','type','sales_price','cost_price'] },
+  plans: { title: 'Plans', icon: '▤', stage: 3, description: 'Define recurring prices, billing intervals and plan policies.', columns: ['Plan','Price','Billing interval','Minimum quantity'], fields: ['name','price','interval','minimum_quantity'] },
+  subscriptions: { title: 'Subscriptions', icon: '↻', stage: 4, description: 'Track every subscription from quotation to renewal.', columns: ['Number','Customer','Plan','Status','Next billing'], fields: ['number','customer','plan','status','next_billing_date'] },
+  invoices: { title: 'Invoices', icon: '▧', stage: 5, description: 'Recurring invoices, taxes and outstanding balances in one place.', columns: ['Invoice','Customer','Status','Due date','Total'], fields: ['number','customer_name','status','due_date','total'] },
+  payments: { title: 'Payments', icon: '↗', stage: 6, description: 'Record incoming payments and match them to invoices.', columns: ['Invoice','Method','Amount','Date'], fields: ['invoice','method','amount','payment_date'] },
+  discounts: { title: 'Discounts', icon: '%', stage: 6, description: 'Manage offers, eligibility rules and discount usage limits.', columns: ['Name','Type','Value','Uses'], fields: ['name','type','value','usage_count'] },
+  settings: { title: 'Settings', icon: '⚙', stage: 3, description: 'Configure tax rules and workspace preferences.', columns: ['Tax rule','Rate','Active'], fields: ['name','rate_basis_points','active'] },
+};
+const content = document.querySelector('#content');
+const escape = (value) => String(value ?? '—').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const money = value => new Intl.NumberFormat('en-IN', {style:'currency',currency:'INR',maximumFractionDigits:2}).format(value/100);
+async function api(path) {
+  const response = await fetch(`/api/${path}`);
+  if (!response.ok) throw new Error('The server could not load this page. Check that the backend is running.');
+  return response.json();
+}
+const heading = (title, description) => `<div class="page-heading"><div><p class="eyebrow">YOUR WORKSPACE, CONNECTED</p><h1>${title}</h1><p class="subtitle">${description}</p></div><span class="badge">Stage 1 · Foundation</span></div>`;
+function overview(data, health) {
+  const cards = [['Customers',data.counts.customers,'Customer accounts','♧'],['Products',data.counts.products,'Products in your catalogue','◇'],['Plans',data.counts.plans,'Recurring billing plans','▤'],['Subscriptions',data.counts.subscriptions,'Across all lifecycle stages','↻']];
+  return `${heading('Workspace overview','A clear view of your subscription business.')}<section class="hero"><p class="eyebrow">BUILT FOR RECURRING BUSINESS</p><h2>Every subscription.<br>One connected workspace.</h2><p>Your foundation is ready. Explore the workspace as we build the journey from your first product to your next renewal.</p><a href="#products">Explore your catalogue <span aria-hidden="true">↗</span></a></section><section class="stats" aria-label="Workspace totals">${cards.map(([label,value,note,icon])=>`<article class="stat"><div class="stat-label">${label}<span aria-hidden="true">${icon}</span></div><div class="stat-value">${value}</div><small>${note}</small></article>`).join('')}</section><div class="two-column"><section class="panel"><h2>A solid place to start</h2><p class="panel-intro">Stage 01 / 08 · Application foundation</p>${[['Application shell','Responsive navigation across all eight workspace modules.'],['Connected database','Persistent SQLite storage with relationships and constraints.'],['Backend API','Read-only endpoints connecting the interface to real records.']].map(([title,note])=>`<div class="check-row"><span class="check-icon" aria-hidden="true">✓</span><div><strong>${title}</strong><small>${note}</small></div></div>`).join('')}</section><section class="panel"><h2>System status</h2><p class="panel-intro">Your local development environment</p><div class="connection"><span>Database connection</span><span><span class="pulse"></span>${escape(health.database)}</span></div><div class="detail-row"><span>Storage engine</span><strong>SQLite</strong></div><div class="detail-row"><span>Schema version</span><strong>v${health.schemaVersion}</strong></div><div class="detail-row"><span>Workspace currency</span><strong>INR · ₹</strong></div><p class="note">Next up: accounts & permissions. Authentication and editing become available in the following stages.</p></section></div>`;
+}
+function format(field, value, item) {
+  if (['sales_price','cost_price','price','total','amount'].includes(field)) return money(value);
+  if (field === 'rate_basis_points' || (field === 'value' && item.type === 'percentage')) return `${value/100}%`;
+  if (field === 'value' && item.type === 'fixed') return money(value);
+  if (field === 'active') return value ? 'Yes' : 'No';
+  return value;
+}
+function moduleView(key, data) {
+  const module = modules[key];
+  return `${heading(module.title,module.description)}<section class="panel module-panel"><div class="table-heading"><h2>${key === 'settings' ? 'Tax rules' : 'All '+module.title.toLowerCase()}</h2><span>${data.items.length} records${data.items.length === data.limit ? ' · first '+data.limit : ''}</span></div>${data.items.length ? `<div class="table-scroll"><table><thead><tr>${module.columns.map(col=>`<th scope="col">${col}</th>`).join('')}</tr></thead><tbody>${data.items.map(item=>`<tr>${module.fields.map(field=>`<td>${escape(format(field,item[field],item))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : `<div class="empty"><div class="empty-icon" aria-hidden="true">${module.icon}</div><h2>No ${key === 'settings' ? 'tax rules' : key} yet</h2><p>${module.description} This workspace starts with an empty database.</p></div>`}</section><div class="stage-note"><strong>Coming in Stage ${module.stage}.</strong> ${key === 'customers' ? 'Registration, login and account permissions' : key === 'settings' ? 'Tax configuration' : module.title+' management'} will be implemented there. This screen currently shows records from the database.</div>`;
+}
+let revision = 0;
+async function render() {
+  const current = ++revision;
+  const key = Object.hasOwn(modules, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const title = modules[key].title;
+  document.title = `${title} · Brightloop`;
+  document.querySelector('#breadcrumb').textContent = title;
+  document.querySelector('#navigation').innerHTML = Object.entries(modules).map(([name,item])=>`<a class="nav-link ${name === key ? 'active' : ''}" ${name === key ? 'aria-current="page"' : ''} href="#${name}"><span class="nav-icon" aria-hidden="true">${item.icon}</span>${item.title}</a>`).join('');
+  content.innerHTML = '<p class="subtitle" role="status">Loading workspace…</p>';
+  try {
+    const html = key === 'overview' ? await Promise.all([api('overview'),api('health')]).then(([data,health])=>overview(data,health)) : moduleView(key,await api(key));
+    if (current === revision) content.innerHTML = html;
+  } catch (error) {
+    if (current === revision) { content.innerHTML = `<div class="error" role="alert">${escape(error.message)} <button id="retry">Retry</button></div>`; document.querySelector('#retry').onclick = render; }
+  }
+}
+window.addEventListener('hashchange',render);
+render();
