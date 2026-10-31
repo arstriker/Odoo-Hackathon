@@ -1,13 +1,14 @@
 # Brightloop Subscription Management System
 
-Stage 1 of the hackathon project: a runnable frontend, backend and persistent relational database.
+A subscription management system for recurring businesses: product catalogue and plans, quotations and subscriptions, automatic billing and invoicing, payments, discounts, and finance reporting. It runs locally on Node.js with a built-in SQLite database and no third-party dependencies.
 
 ## Run
 
 Requires Node.js 22.13 or newer. No third-party dependencies or database service are needed.
 
 ```sh
-cd /home/nandith/Work/subscription-management-system
+git clone https://github.com/arstriker/Odoo-Hackathon.git
+cd Odoo-Hackathon
 npm start
 ```
 
