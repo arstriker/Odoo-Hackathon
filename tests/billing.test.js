@@ -50,6 +50,17 @@ test('a due subscription generates exactly one invoice per billing period', () =
   } finally { db.close(); }
 });
 
+test('invoices use the tax rate agreed on the subscription, not a later tax rule change', () => {
+  const db = setup();
+  try {
+    db.exec('UPDATE subscription_lines SET tax_rate_basis_points = 1800; UPDATE tax_rules SET rate_basis_points = 2800');
+    runBilling(db, '2026-01-31');
+    const [invoice] = invoices(db);
+    assert.deepEqual([invoice.tax_total, invoice.total], [84240, 552240]);
+    assert.equal(db.prepare('SELECT tax_rate_basis_points FROM invoice_lines').get().tax_rate_basis_points, 1800);
+  } finally { db.close(); }
+});
+
 test('missed periods are caught up without gaps or duplicates', () => {
   const db = setup();
   try {

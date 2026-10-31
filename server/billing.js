@@ -29,7 +29,7 @@ function subscriptionLines(db, subscriptionId) {
   return db.prepare(`
     SELECT l.product_id, l.quantity, l.unit_price, p.name AS product_name,
            v.attribute AS variant_attribute, v.value AS variant_value,
-           COALESCE(t.rate_basis_points, 0) AS tax_rate_basis_points
+           COALESCE(l.tax_rate_basis_points, t.rate_basis_points, 0) AS tax_rate_basis_points
     FROM subscription_lines l
     JOIN products p ON p.id = l.product_id
     LEFT JOIN product_variants v ON v.id = l.variant_id
