@@ -32,3 +32,4 @@ tfoot td{font-size:12px;color:#5f6d65;border-bottom:0;padding-top:10px;padding-b
 button.link-button{background:none;border:0;padding:0;margin-top:4px}.link-button.danger-text{color:#a3392f}
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.search-field{flex:1;max-width:420px;margin:0}
 form.toolbar{justify-content:flex-start}
+.panel-pad{padding:18px 24px;margin:0}.module-panel+.module-panel{margin-top:22px}

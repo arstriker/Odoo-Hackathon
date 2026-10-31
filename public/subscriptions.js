@@ -294,6 +294,7 @@
       return subscriptionForm(ctx, existing);
     }
     const [s, invoices] = await Promise.all([ctx.api(`subscriptions/${id}`), ctx.api(`invoices?subscription_id=${id}`)]);
+    const discounts = await window.BrightloopUI.subscriptionDiscounts(ctx, s);
     const stepIndex = s.status === 'paused' ? FLOW.indexOf('active') : FLOW.indexOf(s.status);
     const editable = ['draft', 'quotation'].includes(s.status);
     const policies = [s.plan.auto_close && 'closes automatically at expiry', s.plan.allow_pause && 'can pause', s.plan.allow_renew && 'can renew', s.plan.allow_close && 'can close early'].filter(Boolean);
@@ -321,10 +322,12 @@
       <section class="panel module-panel"><div class="table-heading"><h2>Invoices</h2><span>${invoices.items.length} records</span></div>
       ${invoices.items.length ? `<div class="table-scroll"><table><thead><tr><th>Invoice</th><th>Period</th><th>Status</th><th>Due date</th><th>Total</th><th>Balance</th></tr></thead><tbody>
         ${window.BrightloopUI.invoiceRows(ctx, invoices.items)}</tbody></table></div>`
-        : ctx.empty('▧', 'No invoices yet', s.next_billing_date ? `The first invoice is created on ${e(s.next_billing_date)}.` : 'Invoices are created once the subscription is active.')}</section>`;
+        : ctx.empty('▧', 'No invoices yet', s.next_billing_date ? `The first invoice is created on ${e(s.next_billing_date)}.` : 'Invoices are created once the subscription is active.')}</section>
+      ${discounts.html}`;
     return {
       html,
       mount: root => bindForms(root, {
+        ...discounts.handlers,
         async runAction(dataset) {
           const updated = await ctx.api(`subscriptions/${id}/actions/${dataset.actionName}`, { method: 'POST' });
           ctx.notify(`${updated.number} is now ${updated.status}.`);

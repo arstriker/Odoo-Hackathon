@@ -64,11 +64,11 @@
       <div class="two-column">
         <section class="panel"><h2>Invoice lines</h2><p class="panel-intro">Billing period ${e(i.period_start)} → ${e(i.period_end)} · prices in INR</p>
           <div class="table-scroll"><table><thead><tr><th>Description</th><th>Quantity</th><th>Unit price</th><th>Tax</th><th>Amount</th></tr></thead><tbody>
-            ${i.lines.map(line => `<tr><td>${e(line.description)}</td><td>${line.quantity}</td><td>${ctx.money(line.unit_price)}</td>
+            ${i.lines.map(line => `<tr><td>${e(line.description)}${line.discount_amount ? `<small>Discount − ${ctx.money(line.discount_amount)}</small>` : ''}</td><td>${line.quantity}</td><td>${ctx.money(line.unit_price)}</td>
               <td>${line.tax_rate_basis_points ? `${line.tax_rate_basis_points / 100}%<small>${ctx.money(line.tax_amount)}</small>` : '—'}</td><td>${ctx.money(line.amount)}</td></tr>`).join('')}
           </tbody><tfoot>
             <tr><td colspan="4">Untaxed amount</td><td>${ctx.money(i.subtotal)}</td></tr>
-            ${i.discount_total ? `<tr><td colspan="4">Discounts</td><td>− ${ctx.money(i.discount_total)}</td></tr>` : ''}
+            ${i.discounts.map(d => `<tr><td colspan="4">${e(d.name)}</td><td>− ${ctx.money(d.amount)}</td></tr>`).join('')}
             <tr><td colspan="4">Taxes</td><td>${ctx.money(i.tax_total)}</td></tr>
             <tr class="grand"><td colspan="4">Total</td><td>${ctx.money(i.total)}</td></tr>
             <tr><td colspan="4">Paid</td><td>${ctx.money(i.amount_paid)}</td></tr>

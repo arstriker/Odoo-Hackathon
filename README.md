@@ -62,7 +62,7 @@ Account registration, authentication, record editing, scheduling, invoicing, pay
 - **Access**: admins and staff see and manage all invoices; customers see only their own, and never drafts.
 - **Screens**: an Invoices page with status tabs, overdue flags and a “Run billing now” button; an invoice page with lines, totals, amount paid, balance and Confirm/Cancel; and an Invoices section on each subscription.
 
-## Stage 6 deliverables · Payments
+## Stage 6 deliverables · Payments and discounts
 
 - **Payments**: staff record payments (method, amount, date, optional reference and note) against confirmed invoices. Methods: bank transfer, UPI, card, cash, cheque, other.
 - **Partial payments**: each payment reduces the balance; the invoice becomes Paid automatically when the balance reaches ₹0. Overpayments, future dates, duplicate references and payments on draft, paid or cancelled invoices are rejected.
@@ -70,6 +70,9 @@ Account registration, authentication, record editing, scheduling, invoicing, pay
 - **₹0 invoices** are marked Paid as soon as they are confirmed.
 - **Access**: customers see only payments on their own invoices and cannot record or remove payments.
 - **Screens**: a “Record payment” form on each confirmed invoice (amount defaults to the balance due), payments listed on the invoice with a Remove option, and a Payments page with totals and search.
+- **Discounts**: admins create percentage or fixed discounts with optional products, minimum quantity, minimum purchase, start/end dates and a usage limit. Staff add them to subscriptions; billing applies every qualifying discount to each new invoice, before tax.
+- **Discount rules**: discounts apply in the order they were created, each on what earlier ones left, so a line never goes below ₹0. A fixed amount is shared across qualifying lines by value with no rounding loss. Each invoice a discount is applied to counts as one use, in the same transaction, so the usage limit is never exceeded; cancelling an invoice gives its uses back. Discounts used on invoices can't be deleted (set an end date instead).
+- **Discount screens**: a Discounts page (create, edit, status, uses and amount given), a Discounts section on each subscription to add or remove them, and each invoice lists the discounts it received.
 
 ## Structure
 
@@ -82,7 +85,9 @@ server/catalog.js       Stage 3 API: products, variants, tax rules and plans
 server/subscriptions.js Stage 4 API: customers, quotation templates and subscription lifecycle
 server/billing.js       Stage 5 billing engine and invoice API
 server/payments.js      Stage 6 payments API
+server/discounts.js     Stage 6 discounts API and the discount calculation used by billing
 public/payments.js      Stage 6 Payments page (record payments from the invoice page in public/invoices.js)
+public/discounts.js     Stage 6 Discounts page and the subscription Discounts section
 server/database.js      Database connection and initialization
 server/migrations.js    Ordered schema migrations after version 1
 server/schema.sql       Initial schema and indexes
@@ -95,6 +100,7 @@ tests/catalog.test.js   Stage 3 catalogue and permission tests
 tests/subscriptions.test.js Stage 4 lifecycle, rules and access tests
 tests/billing.test.js   Stage 5 billing periods, totals, invoice actions and access tests
 tests/payments.test.js  Stage 6 payment rules, corrections and access tests
+tests/discounts.test.js Stage 6 discount calculation, conditions, usage limits and access tests
 data/                   Runtime SQLite files (ignored)
 ```
 
@@ -147,6 +153,10 @@ Stage 6 endpoints:
 | GET | `/api/payments` (`?q=`, `?invoice_id=`; returns `{ items, totals }`) | admin, staff; customers see their own |
 | POST | `/api/invoices/:id/payments` (`{ method, amount, payment_date?, reference?, note? }`) | admin, staff |
 | DELETE | `/api/payments/:id` | admin |
+| GET | `/api/discounts`, `/api/discounts/:id` | admin, staff |
+| POST, PATCH, DELETE | `/api/discounts`, `/api/discounts/:id` (`{ name, type, value, minimum_purchase?, minimum_quantity?, start_date?, end_date?, usage_limit?, product_ids? }`) | admin |
+| GET | `/api/subscriptions/:id/discounts` | admin, staff; customers see their own |
+| POST, DELETE | `/api/subscriptions/:id/discounts` (`{ discount_id }`), `/api/subscriptions/:id/discounts/:discountId` | admin, staff |
 
 Example: `POST /api/plans` with `{"name":"Business monthly","price":99900,"interval":"monthly","minimum_quantity":1,"auto_close":true}`.
 
