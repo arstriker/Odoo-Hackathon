@@ -29,6 +29,17 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS quotation_template_lines_template_idx ON quotation_template_lines(template_id);
     `,
   },
+  {
+    version: 4,
+    description: 'Tax rate snapshot on lines and original renewal term on subscriptions',
+    sql: `
+      ALTER TABLE subscription_lines ADD COLUMN tax_rate_basis_points INTEGER CHECK(tax_rate_basis_points BETWEEN 0 AND 10000);
+      ALTER TABLE quotation_template_lines ADD COLUMN tax_rate_basis_points INTEGER CHECK(tax_rate_basis_points BETWEEN 0 AND 10000);
+      UPDATE subscription_lines SET tax_rate_basis_points = (SELECT rate_basis_points FROM tax_rules WHERE id = subscription_lines.tax_rule_id) WHERE tax_rule_id IS NOT NULL;
+      UPDATE quotation_template_lines SET tax_rate_basis_points = (SELECT rate_basis_points FROM tax_rules WHERE id = quotation_template_lines.tax_rule_id) WHERE tax_rule_id IS NOT NULL;
+      ALTER TABLE subscriptions ADD COLUMN term_intervals INTEGER CHECK(term_intervals > 0);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = Math.max(1, ...migrations.map(migration => migration.version));

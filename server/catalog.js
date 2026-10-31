@@ -49,6 +49,11 @@ function variantFields(body, creating) {
   });
 }
 
+// A variant may lower the price, but never below zero.
+function checkVariantPrice(salesPrice, adjustment) {
+  if (salesPrice + (adjustment ?? 0) < 0) throw new HttpError(400, 'The price adjustment cannot make the product price negative.');
+}
+
 function uniqueVariant(error) {
   if (/UNIQUE/.test(error.message)) throw new HttpError(409, 'This product already has a variant with that attribute and value.');
   throw error;
@@ -101,6 +106,7 @@ export const routes = [
       const id = Number(db.prepare(`INSERT INTO products(${keys}) VALUES (${keys.map(() => '?')})`).run(...keys.map(k => fields[k])).lastInsertRowid);
       for (const variant of variants) {
         const values = variantFields(variant ?? {}, true);
+        checkVariantPrice(fields.sales_price, values.price_adjustment);
         try {
           db.prepare('INSERT INTO product_variants(product_id, attribute, value, price_adjustment) VALUES (?, ?, ?, ?)')
             .run(id, values.attribute, values.value, values.price_adjustment ?? 0);
@@ -113,7 +119,12 @@ export const routes = [
     requireRole(user, ...ADMIN);
     const id = routeId(params.id);
     find(db, 'products', id, 'Product');
-    updateRow(db, 'products', id, productFields(await body(), false));
+    const fields = productFields(await body(), false);
+    if (fields.sales_price !== undefined) {
+      const lowest = db.prepare('SELECT MIN(price_adjustment) AS lowest FROM product_variants WHERE product_id = ?').get(id).lowest;
+      checkVariantPrice(fields.sales_price, lowest);
+    }
+    updateRow(db, 'products', id, fields);
     return getProduct(db, id);
   }],
   ['DELETE', '/api/products/:id', ({ db, user, params }) => {
@@ -141,8 +152,9 @@ export const routes = [
   ['POST', '/api/products/:id/variants', async ({ db, user, params, body }) => {
     requireRole(user, ...ADMIN);
     const productId = routeId(params.id);
-    find(db, 'products', productId, 'Product');
+    const product = find(db, 'products', productId, 'Product');
     const values = variantFields(await body(), true);
+    checkVariantPrice(product.sales_price, values.price_adjustment);
     try {
       db.prepare('INSERT INTO product_variants(product_id, attribute, value, price_adjustment) VALUES (?, ?, ?, ?)')
         .run(productId, values.attribute, values.value, values.price_adjustment ?? 0);
@@ -153,7 +165,9 @@ export const routes = [
     requireRole(user, ...ADMIN);
     const id = routeId(params.id);
     const variant = find(db, 'product_variants', id, 'Variant');
-    try { updateRow(db, 'product_variants', id, variantFields(await body(), false)); } catch (error) { uniqueVariant(error); }
+    const values = variantFields(await body(), false);
+    if (values.price_adjustment !== undefined) checkVariantPrice(find(db, 'products', variant.product_id, 'Product').sales_price, values.price_adjustment);
+    try { updateRow(db, 'product_variants', id, values); } catch (error) { uniqueVariant(error); }
     return getProduct(db, variant.product_id);
   }],
   ['DELETE', '/api/variants/:id', ({ db, user, params }) => {
@@ -221,6 +235,11 @@ export const routes = [
     const plan = find(db, 'plans', id, 'Plan');
     const fields = planFields(await body(), false);
     checkPlanDates({ ...plan, ...fields });
+    // Billing frequency and minimum quantity are part of agreed subscriptions, so they are fixed once one is confirmed.
+    const changesTerms = ['interval', 'minimum_quantity'].some(key => fields[key] !== undefined && fields[key] !== plan[key]);
+    if (changesTerms && db.prepare("SELECT 1 FROM subscriptions WHERE plan_id = ? AND status IN ('confirmed', 'active', 'paused') LIMIT 1").get(id)) {
+      throw new HttpError(409, 'This plan has confirmed or running subscriptions, so its billing frequency and minimum quantity cannot change. Create a new plan instead.');
+    }
     updateRow(db, 'plans', id, fields);
     return find(db, 'plans', id, 'Plan');
   }],

@@ -49,23 +49,24 @@ function readLines(db, rawLines, plan) {
       if (!variant) throw new HttpError(400, `${where}: the variant does not belong to ${product.name}.`);
     }
     const taxRuleId = integer(line, 'tax_rule_id', { min: 1, nullable: true }) ?? null;
-    if (taxRuleId && !db.prepare('SELECT 1 FROM tax_rules WHERE id = ? AND active = 1').get(taxRuleId)) {
-      throw new HttpError(400, `${where}: tax rule not found or inactive.`);
-    }
+    const taxRule = taxRuleId ? db.prepare('SELECT rate_basis_points FROM tax_rules WHERE id = ? AND active = 1').get(taxRuleId) : null;
+    if (taxRuleId && !taxRule) throw new HttpError(400, `${where}: tax rule not found or inactive.`);
     const quantity = integer(line, 'quantity', { required: true, min: 1, max: 1_000_000 });
     if (quantity < plan.minimum_quantity) {
       throw new HttpError(400, `${where}: ${plan.name} requires a minimum quantity of ${plan.minimum_quantity}.`);
     }
-    const defaultPrice = Math.max(0, product.sales_price + (variant?.price_adjustment ?? 0));
+    const defaultPrice = product.sales_price + (variant?.price_adjustment ?? 0);
+    if (defaultPrice < 0) throw new HttpError(400, `${where}: the variant makes the price of ${product.name} negative.`);
     const unitPrice = integer(line, 'unit_price', { min: 0, max: 1_000_000_000_00 }) ?? defaultPrice;
-    return { product_id: productId, variant_id: variantId, quantity, unit_price: unitPrice, tax_rule_id: taxRuleId };
+    // The rate is stored on the line so later edits to the tax rule do not change existing documents.
+    return { product_id: productId, variant_id: variantId, quantity, unit_price: unitPrice, tax_rule_id: taxRuleId, tax_rate_basis_points: taxRule?.rate_basis_points ?? null };
   });
 }
 
 function describeLines(db, table, foreignKey, id) {
   const lines = db.prepare(`
     SELECT l.*, p.name AS product_name, v.attribute AS variant_attribute, v.value AS variant_value,
-           t.name AS tax_name, COALESCE(t.rate_basis_points, 0) AS tax_rate_basis_points
+           t.name AS tax_name
     FROM ${table} l
     JOIN products p ON p.id = l.product_id
     LEFT JOIN product_variants v ON v.id = l.variant_id
@@ -73,6 +74,7 @@ function describeLines(db, table, foreignKey, id) {
     WHERE l.${foreignKey} = ? ORDER BY l.id`).all(id);
   const totals = { subtotal: 0, tax_total: 0, total: 0 };
   for (const line of lines) {
+    line.tax_rate_basis_points ??= 0;
     line.amount = line.quantity * line.unit_price;
     line.tax_amount = Math.round(line.amount * line.tax_rate_basis_points / 10000);
     line.total = line.amount + line.tax_amount;
@@ -84,8 +86,8 @@ function describeLines(db, table, foreignKey, id) {
 }
 
 function insertLines(db, table, foreignKey, id, lines) {
-  const insert = db.prepare(`INSERT INTO ${table}(${foreignKey}, product_id, variant_id, quantity, unit_price, tax_rule_id) VALUES (?, ?, ?, ?, ?, ?)`);
-  for (const line of lines) insert.run(id, line.product_id, line.variant_id, line.quantity, line.unit_price, line.tax_rule_id);
+  const insert = db.prepare(`INSERT INTO ${table}(${foreignKey}, product_id, variant_id, quantity, unit_price, tax_rule_id, tax_rate_basis_points) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  for (const line of lines) insert.run(id, line.product_id, line.variant_id, line.quantity, line.unit_price, line.tax_rule_id, line.tax_rate_basis_points ?? null);
 }
 
 function findPlan(db, id) {
@@ -156,7 +158,7 @@ function termIntervals(start, expiry, interval) {
 }
 
 function runAction(db, id, name, user, date = today()) {
-  const action = ACTIONS[name];
+  const action = Object.hasOwn(ACTIONS, name) ? ACTIONS[name] : null;
   if (!action) throw new HttpError(404, 'Unknown action.');
   return transaction(db, () => {
     const subscription = db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
@@ -165,7 +167,7 @@ function runAction(db, id, name, user, date = today()) {
     if (!allowedActions(subscription, plan).includes(name)) {
       const reason = action.from.includes(subscription.status)
         ? `The ${plan.name} plan does not allow this action.`
-        : `A ${subscription.status} subscription cannot be moved with "${action.label}".`;
+        : `${/^[aeiou]/.test(subscription.status) ? 'An' : 'A'} ${subscription.status} subscription cannot be moved with "${action.label}".`;
       throw new HttpError(409, reason);
     }
     const changes = { status: action.to };
@@ -187,7 +189,9 @@ function runAction(db, id, name, user, date = today()) {
       changes.next_billing_date = subscription.next_billing_date ?? subscription.start_date;
     }
     if (name === 'renew') {
-      const intervals = termIntervals(subscription.start_date, subscription.expiry_date, plan.interval);
+      // The original term is measured once and kept, so every renewal extends by the same length.
+      const intervals = subscription.term_intervals ?? termIntervals(subscription.start_date, subscription.expiry_date, plan.interval);
+      changes.term_intervals = intervals;
       changes.expiry_date = addInterval(subscription.expiry_date, plan.interval, intervals);
       changes.next_billing_date = subscription.next_billing_date ?? subscription.start_date;
       note = `Extended to ${changes.expiry_date}`;
@@ -199,15 +203,18 @@ function runAction(db, id, name, user, date = today()) {
   });
 }
 
-// Closes running subscriptions whose plan closes automatically once the expiry date has passed.
+// Closes running subscriptions whose plan closes automatically once the expiry date has passed,
+// and confirmed subscriptions that expired before being activated (they can no longer start).
 export function closeExpiredSubscriptions(db, date = today()) {
   return transaction(db, () => {
     const expired = db.prepare(`
       SELECT s.id, s.status FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-      WHERE s.status IN ('active', 'paused') AND p.auto_close = 1 AND s.expiry_date IS NOT NULL AND s.expiry_date < ?`).all(date);
+      WHERE ((s.status IN ('active', 'paused') AND p.auto_close = 1) OR s.status = 'confirmed')
+        AND s.expiry_date IS NOT NULL AND s.expiry_date < ?`).all(date);
     for (const subscription of expired) {
       db.prepare("UPDATE subscriptions SET status = 'closed', next_billing_date = NULL WHERE id = ?").run(subscription.id);
-      logEvent(db, subscription.id, 'auto_close', subscription.status, 'closed', null, `Plan ended on expiry date (checked ${date})`);
+      const note = subscription.status === 'confirmed' ? `Expired before activation (checked ${date})` : `Plan ended on expiry date (checked ${date})`;
+      logEvent(db, subscription.id, 'auto_close', subscription.status, 'closed', null, note);
     }
     return expired.length;
   });
@@ -240,6 +247,10 @@ function listSubscriptions(db, query, user) {
 }
 
 export const routes = [
+  ['GET', '/api/customers', ({ db, user }) => {
+    requireRole(user, ...TEAM);
+    return { items: db.prepare("SELECT id, name, email, created_at FROM users WHERE role = 'customer' ORDER BY id DESC LIMIT 100").all(), limit: 100 };
+  }],
   ['POST', '/api/customers', async ({ db, user, body }) => {
     requireRole(user, ...TEAM);
     const values = await body();

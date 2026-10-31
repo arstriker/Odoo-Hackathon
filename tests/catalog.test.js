@@ -109,3 +109,18 @@ test('billing intervals clamp to month ends', () => {
   assert.equal(addInterval('2026-12-30', 'weekly'), '2027-01-06');
   assert.equal(addInterval('2026-12-31', 'daily'), '2027-01-01');
 });
+
+test('a variant cannot make the product price negative', async () => {
+  const { call, stop } = await startApp();
+  try {
+    assert.equal((await call('POST', '/products', { name: 'Cheap', sales_price: 10000, variants: [{ attribute: 'A', value: 'B', price_adjustment: -20000 }] })).status, 400);
+    assert.equal((await call('GET', '/products')).body.items.length, 0, 'the rejected product is rolled back');
+    const product = (await call('POST', '/products', { name: 'Cheap', sales_price: 10000 })).body;
+    assert.equal((await call('POST', `/products/${product.id}/variants`, { attribute: 'A', value: 'B', price_adjustment: -20000 })).status, 400);
+    const ok = (await call('POST', `/products/${product.id}/variants`, { attribute: 'A', value: 'B', price_adjustment: -10000 })).body;
+    assert.equal(ok.variants.length, 1);
+    assert.equal((await call('PATCH', `/variants/${ok.variants[0].id}`, { price_adjustment: -10001 })).status, 400);
+    assert.equal((await call('PATCH', `/products/${product.id}`, { sales_price: 5000 })).status, 400);
+    assert.equal((await call('PATCH', `/products/${product.id}`, { sales_price: 10000 })).status, 200);
+  } finally { await stop(); }
+});
